@@ -4,9 +4,7 @@
 #include <fstream>
 #include <iostream>
 
-// ============================================================
-//  get system time
-// ============================================================
+#include <stdarg.h>
 #include <time.h>
 
 // ============================================================
@@ -120,7 +118,7 @@ Logger<decorator>::Logger(const std::string &p_filename,
 	m_timestamp = true;
 	m_datestamp = true;
 	m_logfile << decorator::SessionOpen();
-	Log("Logger opened.");
+	// Log("Logger opened.");
 	m_timestamp = p_timestamp;
 	m_datestamp = p_datestamp;
 }
