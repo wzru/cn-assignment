@@ -127,7 +127,7 @@ template <class decorator> Logger<decorator>::~Logger()
 {
 	m_timestamp = true;
 	m_datestamp = true;
-	Log("Logger closed.");
+	// Log("Logger closed.");
 	m_logfile << decorator::SessionClose();
 }
 

@@ -29,8 +29,8 @@ socklen_t addr_len = sizeof(sockaddr_in);
 
 inline void init(int argc, char *argv[]);
 inline void help(int argc, char *argv[]);
-inline void get();
-inline void put();
+inline int get();
+inline int put();
 
 int main(int argc, char *argv[])
 {
@@ -43,10 +43,18 @@ int main(int argc, char *argv[])
 	server.sin_port = htons(port);
 	//将点分文本的IP地址转换为二进制网络字节序的IP地址
 	inet_pton(AF_INET, host, &(server.sin_addr.s_addr));
-	if (op == TFTP_RRQ)
-		get();
-	else if (op == TFTP_WRQ)
-		put();
+	if (op == TFTP_RRQ) {
+		if (get()) {
+			logger.Log("%s 下载成功!", file);
+		} else
+			logger.Log("%s 下载失败!", file);
+	} else if (op == TFTP_WRQ) {
+		if (put()) {
+			logger.Log("%s 上传成功!", file);
+		} else {
+			logger.Log("%s 上传失败!", file);
+		}
+	}
 	fclose(fp);
 	return 0;
 }
@@ -104,7 +112,7 @@ inline void help(int argc, char *argv[])
 	       argv[0]);
 }
 
-inline void get()
+inline int get()
 {
 	TftpPkt snd_pkt, rcv_pkt;
 	sockaddr_in sender;
@@ -122,7 +130,7 @@ inline void get()
 		fp = fopen(file, "wb");
 	if (fp == NULL) {
 		logger.Log("Create file \"%s\" ERROR", file);
-		return;
+		return 0;
 	}
 	// Receive data
 	snd_pkt.op = htons(TFTP_ACK);
@@ -134,17 +142,17 @@ inline void get()
 					    MSG_DONTWAIT, (sockaddr *)&sender,
 					    &addr_len);
 			if (rcv_size > 0 && rcv_size < 4) {
-				logger.Log("BAD pkt: rcv_size=%d\n", rcv_size);
+				logger.Log("BAD PKT: rcv_size=%d\n", rcv_size);
 			}
 			if (rcv_size >= 4 && rcv_pkt.op == htons(TFTP_DATA) &&
 			    rcv_pkt.block == htons(block)) {
-				logger.Log("Recv : block=%d, data_size=%d",
+				logger.Log("RECV : block=%d, data_size=%d",
 					   ntohs(rcv_pkt.block), rcv_size - 4);
 				// Send ACK
 				snd_pkt.block = rcv_pkt.block;
 				sendto(sockfd, &snd_pkt, sizeof(TftpPkt), 0,
 				       (sockaddr *)&sender, addr_len);
-				logger.Log("Sending ACK for block #%d...",
+				logger.Log("SEND : ACK for block #%d...",
 					   ntohs(rcv_pkt.block));
 				fwrite(rcv_pkt.data, 1, rcv_size - 4, fp);
 				break;
@@ -152,14 +160,15 @@ inline void get()
 			usleep(10000);
 		}
 		if (time_wait >= PKT_RCV_TIMEOUT * PKT_MAX_RXMT) {
-			logger.Log("Wait for PKT #%d timeout", block);
-			return;
+			logger.Log("WAIT for PKT #%d timeout", block);
+			return 0;
 		}
 		block++;
 	} while (rcv_size == DATA_SIZE + 4);
+	return 1;
 }
 
-inline void put()
+inline int put()
 {
 	TftpPkt rcv_pkt, snd_pkt;
 	sockaddr_in sender;
@@ -176,7 +185,7 @@ inline void put()
 				    MSG_DONTWAIT, (struct sockaddr *)&sender,
 				    &addr_len);
 		if (rcv_size > 0 && rcv_size < 4) {
-			logger.Log("BAD pkt: rcv_size=%d", rcv_size);
+			logger.Log("BAD PKT: rcv_size=%d", rcv_size);
 		}
 		if (rcv_size >= 4 && rcv_pkt.op == htons(TFTP_ACK) &&
 		    rcv_pkt.block == htons(0)) {
@@ -186,7 +195,7 @@ inline void put()
 	}
 	if (time_wait >= PKT_RCV_TIMEOUT) {
 		logger.Log("Could not receive from server");
-		return;
+		return 0;
 	}
 	if (!strcmp(mode, "netascii"))
 		fp = fopen(file, "r");
@@ -194,7 +203,7 @@ inline void put()
 		fp = fopen(file, "rb");
 	if (fp == NULL) {
 		logger.Log("File not exists!");
-		return;
+		return 0;
 	}
 	int snd_size = 0, rxmt;
 	uint16 block = 1;
@@ -207,7 +216,7 @@ inline void put()
 		for (rxmt = 0; rxmt < PKT_MAX_RXMT; ++rxmt) {
 			sendto(sockfd, &snd_pkt, snd_size + 4, 0,
 			       (sockaddr *)&sender, addr_len);
-			logger.Log("Send %d", block);
+			logger.Log("SEND : PKT #%d", block);
 			// Wait for ACK.
 			for (time_wait = 0; time_wait < PKT_RCV_TIMEOUT;
 			     time_wait += 20000) {
@@ -218,7 +227,7 @@ inline void put()
 						 (sockaddr *)&sender,
 						 &addr_len);
 				if (rcv_size > 0 && rcv_size < 4) {
-					logger.Log("BAD pkt: rcv_size=%d",
+					logger.Log("BAD PKT: rcv_size=%d",
 						   rcv_size);
 				}
 				if (rcv_size >= 4 &&
@@ -229,18 +238,16 @@ inline void put()
 				usleep(20000);
 			}
 			if (time_wait < PKT_RCV_TIMEOUT) {
-				// Send success
-				break;
+				break; // Send success
 			} else {
-				// Retransmission
-				continue;
+				continue; // Retransmission
 			}
 		}
 		if (rxmt >= PKT_MAX_RXMT) {
 			logger.Log("Could not receive from server");
-			return;
+			return 0;
 		}
 		block++;
 	} while (snd_size == DATA_SIZE);
-	logger.Log("Send file end");
+	return 1;
 }
