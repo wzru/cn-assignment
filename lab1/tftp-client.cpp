@@ -10,6 +10,7 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <dirent.h>
+#include <ctime>
 
 using namespace std;
 
@@ -27,6 +28,8 @@ sockaddr_in server;
 int res, sockfd;
 socklen_t addr_len = sizeof(sockaddr_in);
 const int delay = 10000;
+clock_t tbeg, tend;
+int siz;
 
 inline void init(int argc, char *argv[]);
 inline void help(int argc, char *argv[]);
@@ -57,7 +60,7 @@ int main(int argc, char *argv[])
 			fprintf(stderr, "%s 上传失败!\n", file);
 		}
 	}
-	fclose(fp);
+	if(fp) fclose(fp);
 	return 0;
 }
 
@@ -131,11 +134,13 @@ inline int get()
 	else
 		fp = fopen(file, "wb");
 	if (fp == NULL) {
+		fprintf(stderr, "Create file \"%s\" ERROR\n", file);
 		logger.Log("Create file \"%s\" ERROR", file);
 		return 0;
 	}
 	// Receive data
 	snd_pkt.op = htons(TFTP_ACK);
+	tbeg = clock();
 	do {
 		for (time_wait = 0; time_wait < PKT_RCV_TIMEOUT * PKT_MAX_RXMT;
 		     time_wait += delay) {
@@ -164,19 +169,23 @@ inline int get()
 				       (sockaddr *)&sender, addr_len);
 				logger.Log("SEND : ACK for block #%d...",
 					   ntohs(rcv_pkt.block));
+				siz += rcv_size - 4;
 				fwrite(rcv_pkt.data, 1, rcv_size - 4, fp);
 				break;
 			}
 			usleep(delay);
 		}
 		if (time_wait >= PKT_RCV_TIMEOUT * PKT_MAX_RXMT) {
+			fprintf(stderr, "WAIT for PKT #%d TIMEOUT!\n", block);
 			logger.Log("WAIT for PKT #%d timeout", block);
-			// goto send;
-			// sendto(sockfd, &snd_pkt, sizeof(TftpPkt), 0, (sockaddr *)&sender, addr_len);
 			return 0;
 		}
 		block++;
 	} while (rcv_size == DATA_SIZE + 4);
+	tend = clock();
+	auto tim = (double)(tend - tbeg) / CLOCKS_PER_SEC;
+	fprintf(stderr, "file-size=%d byte, time=%.3lf s\n", siz, tim);
+	fprintf(stderr, "throughput=%.3lf KiB/s\n", (double)siz / 1024 / tim);
 	return 1;
 }
 
@@ -191,7 +200,7 @@ inline int put()
 		0);
 	sendto(sockfd, &snd_pkt, sizeof(TftpPkt), 0, (struct sockaddr *)&server,
 	       addr_len);
-	for (time_wait = 0; time_wait < PKT_RCV_TIMEOUT; time_wait += 20000) {
+	for (time_wait = 0; time_wait < PKT_RCV_TIMEOUT; time_wait += delay) {
 		// Try receive(non-block receive)
 		rcv_size = recvfrom(sockfd, &rcv_pkt, sizeof(TftpPkt),
 				    MSG_DONTWAIT, (struct sockaddr *)&sender,
@@ -203,7 +212,7 @@ inline int put()
 		    rcv_pkt.block == htons(0)) {
 			break;
 		}
-		usleep(20000);
+		usleep(delay);
 	}
 	if (time_wait >= PKT_RCV_TIMEOUT) {
 		logger.Log("Could not receive from server");
@@ -215,15 +224,18 @@ inline int put()
 		fp = fopen(file, "rb");
 	if (fp == NULL) {
 		logger.Log("File not exists!");
+		fprintf(stderr, "File not exists!\n");
 		return 0;
 	}
 	int snd_size = 0, rxmt;
 	uint16 block = 1;
 	snd_pkt.op = htons(TFTP_DATA);
 	// Send data
+	tbeg = clock();
 	do {
 		memset(snd_pkt.data, 0, sizeof(snd_pkt.data));
 		snd_pkt.block = htons(block);
+		siz += DATA_SIZE;
 		snd_size = fread(snd_pkt.data, 1, DATA_SIZE, fp);
 		for (rxmt = 0; rxmt < PKT_MAX_RXMT; ++rxmt) {
 			sendto(sockfd, &snd_pkt, snd_size + 4, 0,
@@ -256,10 +268,15 @@ inline int put()
 			}
 		}
 		if (rxmt >= PKT_MAX_RXMT) {
+			fprintf(stderr, "Could not receive from server!\n");
 			logger.Log("Could not receive from server");
 			return 0;
 		}
 		block++;
 	} while (snd_size == DATA_SIZE);
+	tend = clock();
+	auto tim = (double)(tend - tbeg) / CLOCKS_PER_SEC;
+	fprintf(stderr, "file-size=%d byte, time=%.3lf s\n", siz, tim);
+	fprintf(stderr, "throughput=%.3lf KiB/s\n", (double)siz / 1024 / tim);
 	return 1;
 }
