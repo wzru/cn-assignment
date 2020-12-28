@@ -1,2 +1,7 @@
-*.txt
-tftp-client
+*
+
+!.gitignore
+!*.cpp
+!*.h
+!Makefile
+!CMakeLists.txt

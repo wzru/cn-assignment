@@ -26,6 +26,7 @@ FILE *fp;
 sockaddr_in server;
 int res, sockfd;
 socklen_t addr_len = sizeof(sockaddr_in);
+const int delay = 10000;
 
 inline void init(int argc, char *argv[]);
 inline void help(int argc, char *argv[]);
@@ -39,20 +40,21 @@ int main(int argc, char *argv[])
 		logger.Log("Server socket could not be created.\n");
 		exit(-1);
 	}
+	freopen("tftp.log", "w", stdout);
 	server.sin_family = AF_INET;
 	server.sin_port = htons(port);
 	//将点分文本的IP地址转换为二进制网络字节序的IP地址
 	inet_pton(AF_INET, host, &(server.sin_addr.s_addr));
 	if (op == TFTP_RRQ) {
 		if (get()) {
-			logger.Log("%s 下载成功!", file);
+			fprintf(stderr, "%s 下载成功!\n", file);
 		} else
-			logger.Log("%s 下载失败!", file);
+			fprintf(stderr, "%s 下载失败!\n", file);
 	} else if (op == TFTP_WRQ) {
 		if (put()) {
-			logger.Log("%s 上传成功!", file);
+			fprintf(stderr, "%s 上传成功!\n", file);
 		} else {
-			logger.Log("%s 上传失败!", file);
+			fprintf(stderr, "%s 上传失败!\n", file);
 		}
 	}
 	fclose(fp);
@@ -136,11 +138,19 @@ inline int get()
 	snd_pkt.op = htons(TFTP_ACK);
 	do {
 		for (time_wait = 0; time_wait < PKT_RCV_TIMEOUT * PKT_MAX_RXMT;
-		     time_wait += 10000) {
-			// Try receive(Nonblock receive).
+		     time_wait += delay) {
+			// Try receive(non-block receive).
 			rcv_size = recvfrom(sockfd, &rcv_pkt, sizeof(TftpPkt),
 					    MSG_DONTWAIT, (sockaddr *)&sender,
 					    &addr_len);
+			printf("recv_size=%d\n", rcv_size);
+			if (rcv_size == -1) {
+				sendto(sockfd, &snd_pkt, sizeof(TftpPkt), 0,
+				       (sockaddr *)&sender, addr_len);
+				usleep(delay);
+				logger.Log("RESEND : ACK for block #%d...",
+					   ntohs(rcv_pkt.block));
+			}
 			if (rcv_size > 0 && rcv_size < 4) {
 				logger.Log("BAD PKT: rcv_size=%d\n", rcv_size);
 			}
@@ -157,10 +167,12 @@ inline int get()
 				fwrite(rcv_pkt.data, 1, rcv_size - 4, fp);
 				break;
 			}
-			usleep(10000);
+			usleep(delay);
 		}
 		if (time_wait >= PKT_RCV_TIMEOUT * PKT_MAX_RXMT) {
 			logger.Log("WAIT for PKT #%d timeout", block);
+			// goto send;
+			// sendto(sockfd, &snd_pkt, sizeof(TftpPkt), 0, (sockaddr *)&sender, addr_len);
 			return 0;
 		}
 		block++;
@@ -180,7 +192,7 @@ inline int put()
 	sendto(sockfd, &snd_pkt, sizeof(TftpPkt), 0, (struct sockaddr *)&server,
 	       addr_len);
 	for (time_wait = 0; time_wait < PKT_RCV_TIMEOUT; time_wait += 20000) {
-		// Try receive(Nonblock receive)
+		// Try receive(non-block receive)
 		rcv_size = recvfrom(sockfd, &rcv_pkt, sizeof(TftpPkt),
 				    MSG_DONTWAIT, (struct sockaddr *)&sender,
 				    &addr_len);
@@ -219,8 +231,8 @@ inline int put()
 			logger.Log("SEND : PKT #%d", block);
 			// Wait for ACK.
 			for (time_wait = 0; time_wait < PKT_RCV_TIMEOUT;
-			     time_wait += 20000) {
-				// Try receive(Nonblock receive).
+			     time_wait += delay) {
+				// Try receive(non-block receive).
 				rcv_size =
 					recvfrom(sockfd, &rcv_pkt,
 						 sizeof(TftpPkt), MSG_DONTWAIT,
@@ -235,7 +247,7 @@ inline int put()
 				    rcv_pkt.block == htons(block)) {
 					break;
 				}
-				usleep(20000);
+				usleep(delay);
 			}
 			if (time_wait < PKT_RCV_TIMEOUT) {
 				break; // Send success

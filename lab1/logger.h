@@ -145,7 +145,7 @@ template <class decorator> void Logger<decorator>::Log(const char *fmt, ...)
 	va_start(args, fmt);
 	vsprintf(buf, fmt, args);
 	message += std::string(buf);
-	std::cerr << message << std::endl;
+	std::cout << message << std::endl;
 	m_logfile << decorator::Decorate(message);
 	m_logfile.flush();
 }

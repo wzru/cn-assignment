@@ -36,7 +36,7 @@ enum tftp_op {
 };
 
 // Max packet retransmission.
-const int PKT_MAX_RXMT = 3;
+const int PKT_MAX_RXMT = 10;
 // usecond
 const int PKT_SND_TIMEOUT = 12 * 1000 * 1000;
 const int PKT_RCV_TIMEOUT = 3 * 1000 * 1000;
